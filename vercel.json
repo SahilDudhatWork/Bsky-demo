@@ -8,7 +8,9 @@
         {
             "src": "client/package.json",
             "use": "@vercel/static-build",
-            "config": { "distDir": "dist" }
+            "config": {
+                "distDir": "dist"
+            }
         }
     ],
     "rewrites": [
@@ -21,8 +23,12 @@
             "destination": "/server/index.js"
         },
         {
-            "source": "/(.*)",
-            "destination": "/client/$1"
+            "source": "/auth/callback",
+            "destination": "/client/index.html"
+        },
+        {
+            "source": "/((?!api|oauth).*)",
+            "destination": "/client/index.html"
         }
     ]
 }
