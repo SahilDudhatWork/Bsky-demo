@@ -12,6 +12,7 @@
     }
   ],
   "rewrites": [
+    { "source": "/oauth/(.*)", "destination": "server/index.js" },
     { "source": "/api/(.*)", "destination": "server/index.js" },
     { "source": "/(.*)", "destination": "/client/$1" }
   ]
