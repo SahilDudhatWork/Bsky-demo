@@ -1,7 +1,6 @@
 const express = require('express')
 const { BskyAgent } = require('@atproto/api')
 const crypto = require('crypto')
-
 const { requireAuth } = require('../middleware/auth')
 const User = require('../models/User')
 const { encryptText, decryptText } = require('../lib/crypto')
@@ -9,94 +8,52 @@ const { OAuthHelper } = require('../lib/oauth')
 
 const router = express.Router()
 
-// Store OAuth sessions temporarily (in production, use Redis or database)
-const oauthSessions = new Map()
-
-async function makeAgentForUser(user) {
-  if (!user?.bskyHandle || !user?.bskyAppPasswordEnc) {
-    const err = new Error('Bluesky not connected')
-    err.status = 400
-    throw err
-  }
-
-  const agent = new BskyAgent({ service: 'https://bsky.social' })
-  const appPassword = decryptText(user.bskyAppPasswordEnc)
-  await agent.login({ identifier: user.bskyHandle, password: appPassword })
-  return agent
-}
-
 // OAuth endpoints
 router.post('/auth/start', requireAuth, async (req, res) => {
   try {
     const { identifier, serverUrl } = req.body || {}
-    
     if (!identifier && !serverUrl) {
       return res.status(400).json({ error: 'identifier or serverUrl required' })
     }
 
-    // Resolve server and get metadata
-    let authServer
+    let authServer = serverUrl || 'https://bsky.social'
     if (serverUrl) {
       const metadata = await OAuthHelper.fetchServerMetadata(serverUrl)
       authServer = metadata.issuer
-    } else {
-      // For demo purposes, default to bsky.social
-      authServer = 'https://bsky.social'
     }
 
-    // Generate OAuth session data
-    const sessionId = crypto.randomBytes(16).toString('hex')
     const codeVerifier = OAuthHelper.generateCodeVerifier()
     const codeChallenge = OAuthHelper.generateCodeChallenge(codeVerifier)
     const state = OAuthHelper.generateState()
     const dpopKeyPair = await OAuthHelper.generateDPoPKeyPair()
     
-    const clientId = process.env.BSKY_OAUTH_CLIENT_ID || `${req.protocol}://${req.get('host')}/oauth/client-metadata.json`
-    const redirectUri = process.env.BSKY_OAUTH_REDIRECT_URI || `${req.protocol}://${req.get('host').replace(':5000', ':5173')}/auth/callback`
+    // Vercel friendly URL logic
+    const host = process.env.HOST || req.get('host')
+    const protocol = process.env.PROTOCOL || 'https'
+    const clientId = process.env.BSKY_OAUTH_CLIENT_ID || `${protocol}://${host}/oauth/client-metadata.json`
+    const redirectUri = process.env.BSKY_OAUTH_REDIRECT_URI || `${protocol}://${host}/auth/callback`
     
-    // Store session data
-    oauthSessions.set(sessionId, {
-      codeVerifier,
-      state,
-      dpopKeyPair,
-      authServer,
-      clientId,
-      redirectUri,
-      identifier,
-      userId: req.userId,
-      nonce: null
+    // Store session in MongoDB instead of a Map for Vercel persistence
+    await User.findByIdAndUpdate(req.userId, {
+      oauthTempState: {
+        codeVerifier,
+        state,
+        dpopKeyPair: JSON.stringify(dpopKeyPair),
+        authServer,
+        clientId,
+        redirectUri
+      }
     })
     
-    // Clean up old sessions (older than 10 minutes)
-    setTimeout(() => oauthSessions.delete(sessionId), 600000)
-    
-    // Make PAR request
     const parResult = await OAuthHelper.makePARRequest(
-      authServer,
-      clientId,
-      redirectUri,
-      codeChallenge,
-      state,
-      identifier,
-      dpopKeyPair
+      authServer, clientId, redirectUri, codeChallenge, state, identifier, dpopKeyPair
     )
     
-    // Update session with nonce
-    const session = oauthSessions.get(sessionId)
-    session.nonce = parResult.nonce
+    let authUrl = parResult.useDirectAuth 
+      ? parResult.authUrl 
+      : `${authServer}/oauth/authorize?request_uri=${encodeURIComponent(parResult.requestUri)}&client_id=${encodeURIComponent(clientId)}`
     
-    let authUrl
-    if (parResult.useDirectAuth) {
-      // Use direct authorization URL
-      authUrl = parResult.authUrl
-    } else {
-      // Use PAR request URI
-      authUrl = `${authServer}/oauth/authorize?` +
-        `request_uri=${encodeURIComponent(parResult.requestUri)}&` +
-        `client_id=${encodeURIComponent(clientId)}`
-    }
-    
-    return res.json({ sessionId, authUrl })
+    return res.json({ authUrl })
   } catch (err) {
     console.error('OAuth auth start failed:', err)
     return res.status(500).json({ error: err.message || 'Failed to start OAuth flow' })
@@ -105,165 +62,97 @@ router.post('/auth/start', requireAuth, async (req, res) => {
 
 router.get('/callback', async (req, res) => {
   try {
-    const { code, state, error, iss } = req.query
+    const { code, state } = req.query
+    if (!code || !state) return res.status(400).json({ error: 'Missing code or state' })
     
-    if (error) {
-      return res.status(400).json({ error: `OAuth error: ${error}` })
-    }
+    // Retrieve session from DB by state
+    const user = await User.findOne({ 'oauthTempState.state': state })
+    if (!user || !user.oauthTempState) return res.status(400).json({ error: 'Invalid or expired state' })
     
-    if (!code || !state) {
-      return res.status(400).json({ error: 'Missing code or state' })
-    }
+    const { codeVerifier, dpopKeyPair, authServer, clientId, redirectUri } = user.oauthTempState
+    const parsedKeyPair = JSON.parse(dpopKeyPair)
     
-    // Find session by state
-    let sessionId = null
-    let sessionData = null
-    
-    for (const [sid, session] of oauthSessions.entries()) {
-      if (session.state === state) {
-        sessionId = sid
-        sessionData = session
-        break
-      }
-    }
-    
-    if (!sessionData) {
-      return res.status(400).json({ error: 'Invalid or expired state' })
-    }
-    
-    const { codeVerifier, dpopKeyPair, authServer, clientId, redirectUri, userId, nonce } = sessionData
-    
-    // Exchange code for tokens
-    const { tokens, nonce: newNonce } = await OAuthHelper.exchangeCodeForTokens(
-      authServer,
-      code,
-      redirectUri,
-      codeVerifier,
-      clientId,
-      dpopKeyPair,
-      nonce
+    const { tokens, nonce } = await OAuthHelper.exchangeCodeForTokens(
+      authServer, code, redirectUri, codeVerifier, clientId, parsedKeyPair, null
     )
     
-    // Store tokens securely
-    await User.findByIdAndUpdate(userId, {
-      bskyHandle: null, // Will be set after getting user info
+    await User.findByIdAndUpdate(user._id, {
       bskyAccessTokenEnc: encryptText(tokens.access_token),
       bskyRefreshTokenEnc: encryptText(tokens.refresh_token || ''),
-      bskyTokenType: tokens.token_type || 'DPoP',
       bskyExpiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
-      bskyDid: tokens.sub, // DID from the token response
+      bskyDid: tokens.sub,
       bskyAuthServer: authServer,
-      bskyDpopKeyEnc: encryptText(JSON.stringify(dpopKeyPair)),
-      bskyNonceEnc: encryptText(newNonce || nonce || '')
+      bskyDpopKeyEnc: encryptText(dpopKeyPair),
+      bskyNonceEnc: encryptText(nonce || ''),
+      $unset: { oauthTempState: 1 } // Clean up temp state
     })
     
-    // Get user info using the access token
     const agent = new BskyAgent({ service: authServer })
     await agent.resumeSession(tokens.access_token)
-    
-    const handle = agent.session?.handle
-    if (handle) {
-      await User.findByIdAndUpdate(userId, { bskyHandle: handle })
+    if (agent.session?.handle) {
+      await User.findByIdAndUpdate(user._id, { bskyHandle: agent.session.handle })
     }
     
-    // Clean up session
-    oauthSessions.delete(sessionId)
-    
-    return res.json({ ok: true, handle, did: tokens.sub })
+    return res.json({ ok: true, handle: agent.session?.handle })
   } catch (err) {
-    console.error('OAuth callback failed:', err)
-    return res.status(500).json({ error: err.message || 'OAuth callback failed' })
+    return res.status(500).json({ error: err.message || 'Callback failed' })
   }
 })
 
-// Updated makeAgentForUser to use OAuth tokens
 async function makeAgentForUser(user) {
-  if (!user?.bskyHandle && !user?.bskyDid) {
-    const err = new Error('Bluesky not connected')
-    err.status = 400
-    throw err
-  }
+  if (!user?.bskyHandle && !user?.bskyDid) throw new Error('Bluesky not connected')
 
   const service = user.bskyAuthServer || 'https://bsky.social'
   const agent = new BskyAgent({ service })
   
-  // Try OAuth token first
   if (user.bskyAccessTokenEnc) {
     try {
-      const accessToken = decryptText(user.bskyAccessTokenEnc)
-      await agent.resumeSession(accessToken)
+      let accessToken = decryptText(user.bskyAccessTokenEnc)
       
-      // Check if token needs refresh
+      // Token Refresh Logic
       if (user.bskyRefreshTokenEnc && user.bskyExpiresAt && new Date() >= user.bskyExpiresAt) {
         const refreshToken = decryptText(user.bskyRefreshTokenEnc)
-        const dpopKeyPair = JSON.parse(decryptText(user.bskyDpopKeyEnc || '{}'))
+        const dpopKeyPair = JSON.parse(decryptText(user.bskyDpopKeyEnc))
         const nonce = decryptText(user.bskyNonceEnc || '')
-        const clientId = process.env.BSKY_OAUTH_CLIENT_ID || `${process.env.PROTOCOL || 'http'}://${process.env.HOST || 'localhost'}:${process.env.PORT || 5000}/oauth/client-metadata.json`
+        const host = process.env.HOST || 'localhost:5000'
+        const clientId = process.env.BSKY_OAUTH_CLIENT_ID || `https://${host}/oauth/client-metadata.json`
         
-        try {
-          const { tokens } = await OAuthHelper.refreshAccessToken(
-            service,
-            refreshToken,
-            clientId,
-            dpopKeyPair,
-            nonce
-          )
-          
-          await agent.resumeSession(tokens.access_token)
-          
-          // Update stored tokens
-          await User.findByIdAndUpdate(user._id, {
-            bskyAccessTokenEnc: encryptText(tokens.access_token),
-            bskyRefreshTokenEnc: encryptText(tokens.refresh_token || refreshToken),
-            bskyExpiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
-          })
-        } catch (refreshErr) {
-          console.warn('Token refresh failed:', refreshErr.message)
-          // Continue with existing token if refresh fails
-        }
+        const { tokens } = await OAuthHelper.refreshAccessToken(service, refreshToken, clientId, dpopKeyPair, nonce)
+        accessToken = tokens.access_token
+        
+        await User.findByIdAndUpdate(user._id, {
+          bskyAccessTokenEnc: encryptText(tokens.access_token),
+          bskyRefreshTokenEnc: encryptText(tokens.refresh_token || refreshToken),
+          bskyExpiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
+        })
       }
       
+      await agent.resumeSession(accessToken)
       return agent
-    } catch (oauthErr) {
-      console.warn('OAuth token failed, falling back to app password:', oauthErr.message)
+    } catch (err) {
+      console.warn('OAuth failed, trying app password')
     }
   }
   
-  // Fallback to app password
-  if (!user?.bskyAppPasswordEnc) {
-    const err = new Error('Bluesky not connected')
-    err.status = 400
-    throw err
+  if (user.bskyAppPasswordEnc) {
+    const appPassword = decryptText(user.bskyAppPasswordEnc)
+    await agent.login({ identifier: user.bskyHandle, password: appPassword })
+    return agent
   }
-
-  const appPassword = decryptText(user.bskyAppPasswordEnc)
-  await agent.login({ identifier: user.bskyHandle, password: appPassword })
-  return agent
+  
+  throw new Error('No valid authentication found')
 }
 
+// ... existing /connect and /feed routes ...
 router.post('/connect', requireAuth, async (req, res) => {
   try {
     const { handle, appPassword } = req.body || {}
-    if (!handle || !appPassword) {
-      return res.status(400).json({ error: 'handle and appPassword required' })
-    }
-
     const agent = new BskyAgent({ service: 'https://bsky.social' })
     await agent.login({ identifier: handle, password: appPassword })
-
-    const enc = encryptText(appPassword)
-    await User.findByIdAndUpdate(req.userId, { bskyHandle: handle, bskyAppPasswordEnc: enc })
-
+    await User.findByIdAndUpdate(req.userId, { bskyHandle: handle, bskyAppPasswordEnc: encryptText(appPassword) })
     return res.json({ ok: true })
   } catch (err) {
-    console.error('Bluesky connect failed:', err)
-    const status = err?.status || err?.response?.status || 400
-    const msg =
-      err?.message ||
-      err?.response?.data?.message ||
-      err?.response?.data?.error ||
-      'Bluesky connect failed'
-    return res.status(status).json({ error: msg })
+    return res.status(400).json({ error: err.message })
   }
 })
 
@@ -271,19 +160,15 @@ router.get('/feed', requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.userId)
     const agent = await makeAgentForUser(user)
-
     const out = await agent.getAuthorFeed({ actor: user.bskyHandle, limit: 20 })
-    const feed = (out.data.feed || []).map((it) => ({
+    const feed = (out.data.feed || []).map(it => ({
       uri: it.post?.uri,
-      cid: it.post?.cid,
       text: it.post?.record?.text,
       indexedAt: it.post?.indexedAt
     }))
-
     return res.json({ feed })
   } catch (err) {
-    const status = err.status || 400
-    return res.status(status).json({ error: err.message || 'Failed to fetch feed' })
+    return res.status(400).json({ error: err.message })
   }
 })
 
