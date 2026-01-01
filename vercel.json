@@ -23,11 +23,11 @@
             "destination": "/server/index.js"
         },
         {
-            "source": "/auth/callback",
-            "destination": "/client/index.html"
+            "source": "/(.*)",
+            "destination": "/client/$1"
         },
         {
-            "source": "/((?!api|oauth).*)",
+            "source": "/auth/callback",
             "destination": "/client/index.html"
         }
     ]
