@@ -17,8 +17,8 @@
             "destination": "/server/index.js"
         },
         {
-            "source": "/oauth/client-metadata.json",
-            "destination": "/client/oauth/client-metadata.json"
+            "source": "/oauth/(.*)",
+            "destination": "/server/index.js"
         },
         {
             "source": "/(.*)",
