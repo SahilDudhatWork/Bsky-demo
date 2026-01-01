@@ -52,7 +52,7 @@ router.post('/auth/start', requireAuth, async (req, res) => {
     const dpopKeyPair = await OAuthHelper.generateDPoPKeyPair()
     
     const clientId = process.env.BSKY_OAUTH_CLIENT_ID || `${req.protocol}://${req.get('host')}/oauth/client-metadata.json`
-    const redirectUri = process.env.BSKY_OAUTH_REDIRECT_URI || `${req.protocol.replace('http', 'http')}://${req.get('host').replace('5000', '5173')}/auth/callback`
+    const redirectUri = process.env.BSKY_OAUTH_REDIRECT_URI || `${req.protocol}://${req.get('host').replace(':5000', ':5173')}/auth/callback`
     
     // Store session data
     oauthSessions.set(sessionId, {

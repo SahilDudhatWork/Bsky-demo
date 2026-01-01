@@ -118,12 +118,9 @@ class OAuthHelper {
         // If we get a 404, let's try the traditional OAuth flow without PAR
         if (response.status === 404 && attempt === 0) {
           console.warn('PAR endpoint not found, falling back to direct authorization')
-          // For direct auth, use a simple client ID, not the metadata URL
-          const simpleClientId = 'bluesky-demo-app'
-          
-          // Generate a direct authorization URL instead
+          // Use the actual client ID for direct auth
           const authUrl = `${authServer}/oauth/authorize?` +
-            `client_id=${encodeURIComponent(simpleClientId)}&` +
+            `client_id=${encodeURIComponent(clientId)}&` +
             `redirect_uri=${encodeURIComponent(redirectUri)}&` +
             `response_type=code&` +
             `scope=${encodeURIComponent('atproto transition:generic')}&` +
@@ -140,12 +137,9 @@ class OAuthHelper {
           const errorData = await response.json().catch(() => ({}))
           console.warn('PAR request invalid, falling back to direct authorization:', errorData)
           
-          // For direct auth, use a simple client ID, not the metadata URL
-          const simpleClientId = 'bluesky-demo-app'
-          
-          // Generate a direct authorization URL instead
+          // Use the actual client ID for direct auth
           const authUrl = `${authServer}/oauth/authorize?` +
-            `client_id=${encodeURIComponent(simpleClientId)}&` +
+            `client_id=${encodeURIComponent(clientId)}&` +
             `redirect_uri=${encodeURIComponent(redirectUri)}&` +
             `response_type=code&` +
             `scope=${encodeURIComponent('atproto transition:generic')}&` +

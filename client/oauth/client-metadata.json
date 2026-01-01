@@ -1,12 +1,19 @@
 {
-  "client_id": "http://localhost:5174/oauth/client-metadata.json",
+  "client_id": "https://bsky-demo-4cuvl9prs-sahildudhatworks-projects.vercel.app/oauth/client-metadata.json",
   "application_type": "web",
   "client_name": "Bluesky Demo App",
-  "client_uri": "http://localhost:5174",
+  "client_uri": "https://bsky-demo-4cuvl9prs-sahildudhatworks-projects.vercel.app",
   "dpop_bound_access_tokens": true,
-  "grant_types": ["authorization_code", "refresh_token"],
-  "redirect_uris": ["http://localhost:5174/auth/callback"],
-  "response_types": ["code"],
+  "grant_types": [
+    "authorization_code",
+    "refresh_token"
+  ],
+  "redirect_uris": [
+    "https://bsky-demo-4cuvl9prs-sahildudhatworks-projects.vercel.app/auth/callback"
+  ],
+  "response_types": [
+    "code"
+  ],
   "scope": "atproto transition:generic",
   "token_endpoint_auth_method": "none"
 }
