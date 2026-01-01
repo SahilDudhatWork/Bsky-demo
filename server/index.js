@@ -27,7 +27,7 @@ app.use('/api/posts', postRoutes)
 // Serve client metadata for atproto OAuth
 app.get('/oauth/client-metadata.json', (req, res) => {
   const clientId = `${req.protocol}://${req.get('host')}/oauth/client-metadata.json`
-  const redirectUri = `${req.protocol}://${req.get('host').replace(':5000', ':5173')}/auth/callback`
+  const redirectUri = process.env.CLIENT_REDIRECT_URI || `${req.protocol}://${req.get('host')}/auth/callback`
   
   res.json({
     client_id: clientId,
