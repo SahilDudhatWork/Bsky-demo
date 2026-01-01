@@ -151,7 +151,7 @@ class OAuthHelper {
 
         // For other errors, try to get error details
         const errorData = await response.json().catch(() => ({}))
-        throw new Error(`PAR request failed: ${response.status} - ${errorData.error || errorData.error_description || 'Unknown error'}`)
+        // throw new Error(`PAR request failed: ${response.status} - ${errorData.error || errorData.error_description || 'Unknown error'}`)
       } catch (err) {
         if (attempt === maxRetries - 1) {
           throw err
