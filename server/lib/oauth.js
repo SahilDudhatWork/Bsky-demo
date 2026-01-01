@@ -45,8 +45,15 @@ class OAuthHelper {
       payload.ath = hash.toString('base64url')
     }
 
+    // Create proper JWT with header and payload
+    const jwtHeader = Buffer.from(JSON.stringify(header)).toString('base64url')
+    const jwtPayload = Buffer.from(JSON.stringify(payload)).toString('base64url')
+    const jwtData = `${jwtHeader}.${jwtPayload}`
+    
     const privateKey = crypto.createPrivateKey(keyPair.privateKey)
-    return crypto.sign(null, Buffer.from(JSON.stringify(payload)), privateKey).toString('base64url')
+    const signature = crypto.sign(null, Buffer.from(jwtData), privateKey).toString('base64url')
+    
+    return `${jwtData}.${signature}`
   }
 
   static async makeDPoPRequest(url, options = {}, dpopKeyPair, nonce = null, accessToken = null) {
@@ -92,12 +99,13 @@ class OAuthHelper {
     }
 
     let nonce = null
-    let maxRetries = 2
+    let maxRetries = 3 // Allow for nonce retry
     
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
+        const parUrl = `${authServer}/oauth/par`
         const { response, nonce: newNonce } = await this.makeDPoPRequest(
-          `${authServer}/oauth/par`,
+          parUrl,
           {
             method: 'POST',
             headers: {
@@ -115,50 +123,33 @@ class OAuthHelper {
           return { requestUri: data.request_uri, nonce: newNonce || nonce }
         }
 
-        // If we get a 404, let's try the traditional OAuth flow without PAR
-        if (response.status === 404 && attempt === 0) {
-          console.warn('PAR endpoint not found, falling back to direct authorization')
-          // Use the actual client ID for direct auth
-          const authUrl = `${authServer}/oauth/authorize?` +
-            `client_id=${encodeURIComponent(clientId)}&` +
-            `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-            `response_type=code&` +
-            `scope=${encodeURIComponent('atproto transition:generic')}&` +
-            `code_challenge=${encodeURIComponent(codeChallenge)}&` +
-            `code_challenge_method=S256&` +
-            `state=${state}` +
-            (loginHint ? `&login_hint=${encodeURIComponent(loginHint)}` : '')
-          
-          return { authUrl, nonce: newNonce || nonce, useDirectAuth: true }
-        }
-
-        // If we get 400, it might be a request format issue, try direct auth
-        if (response.status === 400 && attempt === 0) {
-          const errorData = await response.json().catch(() => ({}))
-          console.warn('PAR request invalid, falling back to direct authorization:', errorData)
-          
-          // Use the actual client ID for direct auth
-          const authUrl = `${authServer}/oauth/authorize?` +
-            `client_id=${encodeURIComponent(clientId)}&` +
-            `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-            `response_type=code&` +
-            `scope=${encodeURIComponent('atproto transition:generic')}&` +
-            `code_challenge=${encodeURIComponent(codeChallenge)}&` +
-            `code_challenge_method=S256&` +
-            `state=${state}` +
-            (loginHint ? `&login_hint=${encodeURIComponent(loginHint)}` : '')
-          
-          return { authUrl, nonce: newNonce || nonce, useDirectAuth: true }
-        }
-
+        // Handle DPoP nonce error
         if (response.status === 401) {
           const errorData = await response.json().catch(() => ({}))
           if (errorData.error === 'use_dpop_nonce' && newNonce) {
             nonce = newNonce
-            continue
+            continue // Retry with new nonce
           }
         }
 
+        // If we get a 404 or 400, fall back to direct authorization
+        if ((response.status === 404 || response.status === 400) && attempt === 0) {
+          console.warn(`PAR endpoint returned ${response.status}, falling back to direct authorization`)
+          
+          const authUrl = `${authServer}/oauth/authorize?` +
+            `client_id=${encodeURIComponent(clientId)}&` +
+            `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+            `response_type=code&` +
+            `scope=${encodeURIComponent('atproto transition:generic')}&` +
+            `code_challenge=${encodeURIComponent(codeChallenge)}&` +
+            `code_challenge_method=S256&` +
+            `state=${state}` +
+            (loginHint ? `&login_hint=${encodeURIComponent(loginHint)}` : '')
+          
+          return { authUrl, nonce: newNonce || nonce, useDirectAuth: true }
+        }
+
+        // For other errors, try to get error details
         const errorData = await response.json().catch(() => ({}))
         throw new Error(`PAR request failed: ${response.status} - ${errorData.error || errorData.error_description || 'Unknown error'}`)
       } catch (err) {
@@ -183,11 +174,12 @@ class OAuthHelper {
     })
 
     let currentNonce = nonce
-    let maxRetries = 2
+    let maxRetries = 3
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const tokenUrl = `${authServer}/oauth/token`
       const { response, nonce: newNonce } = await this.makeDPoPRequest(
-        `${authServer}/oauth/token`,
+        tokenUrl,
         {
           method: 'POST',
           headers: {
@@ -207,11 +199,12 @@ class OAuthHelper {
         }
       }
 
+      // Handle DPoP nonce error
       if (response.status === 401) {
         const errorData = await response.json().catch(() => ({}))
         if (errorData.error === 'use_dpop_nonce' && newNonce) {
           currentNonce = newNonce
-          continue
+          continue // Retry with new nonce
         }
       }
 
@@ -230,11 +223,12 @@ class OAuthHelper {
     })
 
     let currentNonce = nonce
-    let maxRetries = 2
+    let maxRetries = 3
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const tokenUrl = `${authServer}/oauth/token`
       const { response, nonce: newNonce } = await this.makeDPoPRequest(
-        `${authServer}/oauth/token`,
+        tokenUrl,
         {
           method: 'POST',
           headers: {
@@ -254,11 +248,12 @@ class OAuthHelper {
         }
       }
 
+      // Handle DPoP nonce error
       if (response.status === 401) {
         const errorData = await response.json().catch(() => ({}))
         if (errorData.error === 'use_dpop_nonce' && newNonce) {
           currentNonce = newNonce
-          continue
+          continue // Retry with new nonce
         }
       }
 
