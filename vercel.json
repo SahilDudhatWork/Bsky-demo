@@ -23,12 +23,12 @@
             "destination": "/server/index.js"
         },
         {
-            "source": "/(.*)",
-            "destination": "/client/$1"
-        },
-        {
             "source": "/auth/callback",
             "destination": "/client/index.html"
+        },
+        {
+            "source": "/(.*)",
+            "destination": "/client/$1"
         }
     ]
 }
