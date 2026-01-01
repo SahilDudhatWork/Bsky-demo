@@ -1,15 +1,15 @@
 {
-  "client_id": "https://bsky-demo-4cuvl9prs-sahildudhatworks-projects.vercel.app/oauth/client-metadata.json",
+  "client_id": "https://bsky-demo.vercel.app/oauth/client-metadata.json",
   "application_type": "web",
   "client_name": "Bluesky Demo App",
-  "client_uri": "https://bsky-demo-4cuvl9prs-sahildudhatworks-projects.vercel.app",
+  "client_uri": "https://bsky-demo.vercel.app/",
   "dpop_bound_access_tokens": true,
   "grant_types": [
     "authorization_code",
     "refresh_token"
   ],
   "redirect_uris": [
-    "https://bsky-demo-4cuvl9prs-sahildudhatworks-projects.vercel.app/auth/callback"
+    "https://bsky-demo.vercel.app/auth/callback"
   ],
   "response_types": [
     "code"
