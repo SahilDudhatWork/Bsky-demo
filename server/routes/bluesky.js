@@ -27,11 +27,21 @@ router.post('/auth/start', requireAuth, async (req, res) => {
     const state = OAuthHelper.generateState()
     const dpopKeyPair = await OAuthHelper.generateDPoPKeyPair()
     
+    // Debug logging
+    console.log('Environment variables:', {
+      HOST: process.env.HOST,
+      PROTOCOL: process.env.PROTOCOL,
+      BSKY_OAUTH_CLIENT_ID: process.env.BSKY_OAUTH_CLIENT_ID,
+      BSKY_OAUTH_REDIRECT_URI: process.env.BSKY_OAUTH_REDIRECT_URI
+    })
+    
     // Vercel friendly URL logic
     const host = process.env.HOST || req.get('host')
     const protocol = process.env.PROTOCOL || 'https'
     const clientId = process.env.BSKY_OAUTH_CLIENT_ID || `${protocol}://${host}/oauth/client-metadata.json`
     const redirectUri = process.env.BSKY_OAUTH_REDIRECT_URI || `${protocol}://${host}/auth/callback`
+    
+    console.log('OAuth URLs:', { clientId, redirectUri })
     
     // Store session in MongoDB instead of a Map for Vercel persistence
     await User.findByIdAndUpdate(req.userId, {
