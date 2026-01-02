@@ -35,11 +35,10 @@ router.post('/auth/start', requireAuth, async (req, res) => {
       BSKY_OAUTH_REDIRECT_URI: process.env.BSKY_OAUTH_REDIRECT_URI
     })
     
-    // Vercel friendly URL logic
-    const host = process.env.HOST || req.get('host')
-    const protocol = process.env.PROTOCOL || 'https'
-    const clientId = process.env.BSKY_OAUTH_CLIENT_ID || `${protocol}://${host}/oauth/client-metadata.json`
-    const redirectUri = process.env.BSKY_OAUTH_REDIRECT_URI || `${protocol}://${host}/auth/callback`
+    // Use static live URL for callback
+    const staticLiveUrl = 'https://bsky-demo.vercel.app'
+    const clientId = `${staticLiveUrl}/oauth/client-metadata.json`
+    const redirectUri = `${staticLiveUrl}/auth/callback`
     
     console.log('OAuth URLs:', { clientId, redirectUri })
     
@@ -73,21 +72,15 @@ router.post('/auth/start', requireAuth, async (req, res) => {
 router.get('/callback', async (req, res) => {
   try {
     const { code, state } = req.query
+    const staticLiveUrl = 'https://bsky-demo.vercel.app'
     if (!code || !state) {
-      // Redirect back to client with error
-      const frontendUrl = process.env.PROTOCOL === 'https' 
-        ? 'https://bsky-demo-git-main-sahildudhatworks-projects.vercel.app'
-        : 'http://localhost:5173'
-      return res.redirect(`${frontendUrl}?error=missing_code_or_state`)
+      return res.redirect(`${staticLiveUrl}?error=missing_code_or_state`)
     }
     
     // Retrieve session from DB by state
     const user = await User.findOne({ 'oauthTempState.state': state })
     if (!user || !user.oauthTempState) {
-      const frontendUrl = process.env.PROTOCOL === 'https' 
-        ? 'https://bsky-demo-git-main-sahildudhatworks-projects.vercel.app'
-        : 'http://localhost:5173'
-      return res.redirect(`${frontendUrl}?error=invalid_state`)
+      return res.redirect(`${staticLiveUrl}?error=invalid_state`)
     }
     
     const { codeVerifier, dpopKeyPair, authServer, clientId, redirectUri } = user.oauthTempState
@@ -114,16 +107,11 @@ router.get('/callback', async (req, res) => {
     })
     
     // Redirect back to client with success
-    const frontendUrl = process.env.PROTOCOL === 'https' 
-      ? 'https://bsky-demo-git-main-sahildudhatworks-projects.vercel.app'
-      : 'http://localhost:5173'
-    return res.redirect(`${frontendUrl}?success=true&handle=${encodeURIComponent(handle)}`)
+    return res.redirect(`${staticLiveUrl}?success=true&handle=${encodeURIComponent(handle)}`)
   } catch (err) {
     console.error('OAuth callback error:', err)
-    const frontendUrl = process.env.PROTOCOL === 'https' 
-      ? 'https://bsky-demo-git-main-sahildudhatworks-projects.vercel.app'
-      : 'http://localhost:5173'
-    return res.redirect(`${frontendUrl}?error=${encodeURIComponent(err.message || 'Callback failed')}`)
+    const staticLiveUrl = 'https://bsky-demo.vercel.app'
+    return res.redirect(`${staticLiveUrl}?error=${encodeURIComponent(err.message || 'Callback failed')}`)
   }
 })
 
