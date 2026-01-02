@@ -63,7 +63,7 @@ router.post('/auth/start', requireAuth, async (req, res) => {
       ? parResult.authUrl 
       : `${authServer}/oauth/authorize?request_uri=${encodeURIComponent(parResult.requestUri)}&client_id=${encodeURIComponent(clientId)}`
     
-    return res.json({ authUrl })
+    return res.json({ sessionId: state, authUrl })
   } catch (err) {
     console.error('OAuth auth start failed:', err)
     return res.status(500).json({ error: err.message || 'Failed to start OAuth flow' })
@@ -73,11 +73,22 @@ router.post('/auth/start', requireAuth, async (req, res) => {
 router.get('/callback', async (req, res) => {
   try {
     const { code, state } = req.query
-    if (!code || !state) return res.status(400).json({ error: 'Missing code or state' })
+    if (!code || !state) {
+      // Redirect back to client with error
+      const frontendUrl = process.env.PROTOCOL === 'https' 
+        ? 'https://bsky-demo-git-main-sahildudhatworks-projects.vercel.app'
+        : 'http://localhost:5173'
+      return res.redirect(`${frontendUrl}?error=missing_code_or_state`)
+    }
     
     // Retrieve session from DB by state
     const user = await User.findOne({ 'oauthTempState.state': state })
-    if (!user || !user.oauthTempState) return res.status(400).json({ error: 'Invalid or expired state' })
+    if (!user || !user.oauthTempState) {
+      const frontendUrl = process.env.PROTOCOL === 'https' 
+        ? 'https://bsky-demo-git-main-sahildudhatworks-projects.vercel.app'
+        : 'http://localhost:5173'
+      return res.redirect(`${frontendUrl}?error=invalid_state`)
+    }
     
     const { codeVerifier, dpopKeyPair, authServer, clientId, redirectUri } = user.oauthTempState
     const parsedKeyPair = JSON.parse(dpopKeyPair)
@@ -85,6 +96,10 @@ router.get('/callback', async (req, res) => {
     const { tokens, nonce } = await OAuthHelper.exchangeCodeForTokens(
       authServer, code, redirectUri, codeVerifier, clientId, parsedKeyPair, null
     )
+    
+    const agent = new BskyAgent({ service: authServer })
+    await agent.resumeSession(tokens.access_token)
+    const handle = agent.session?.handle || 'unknown'
     
     await User.findByIdAndUpdate(user._id, {
       bskyAccessTokenEnc: encryptText(tokens.access_token),
@@ -94,18 +109,21 @@ router.get('/callback', async (req, res) => {
       bskyAuthServer: authServer,
       bskyDpopKeyEnc: encryptText(dpopKeyPair),
       bskyNonceEnc: encryptText(nonce || ''),
+      bskyHandle: handle,
       $unset: { oauthTempState: 1 } // Clean up temp state
     })
     
-    const agent = new BskyAgent({ service: authServer })
-    await agent.resumeSession(tokens.access_token)
-    if (agent.session?.handle) {
-      await User.findByIdAndUpdate(user._id, { bskyHandle: agent.session.handle })
-    }
-    
-    return res.json({ ok: true, handle: agent.session?.handle })
+    // Redirect back to client with success
+    const frontendUrl = process.env.PROTOCOL === 'https' 
+      ? 'https://bsky-demo-git-main-sahildudhatworks-projects.vercel.app'
+      : 'http://localhost:5173'
+    return res.redirect(`${frontendUrl}?success=true&handle=${encodeURIComponent(handle)}`)
   } catch (err) {
-    return res.status(500).json({ error: err.message || 'Callback failed' })
+    console.error('OAuth callback error:', err)
+    const frontendUrl = process.env.PROTOCOL === 'https' 
+      ? 'https://bsky-demo-git-main-sahildudhatworks-projects.vercel.app'
+      : 'http://localhost:5173'
+    return res.redirect(`${frontendUrl}?error=${encodeURIComponent(err.message || 'Callback failed')}`)
   }
 })
 

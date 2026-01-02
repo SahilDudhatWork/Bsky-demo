@@ -97,8 +97,8 @@ export default function App() {
   // Handle OAuth callback
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search)
-    const code = urlParams.get('code')
-    const state = urlParams.get('state')
+    const success = urlParams.get('success')
+    const handle = urlParams.get('handle')
     const error = urlParams.get('error')
     
     if (error) {
@@ -106,6 +106,18 @@ export default function App() {
       window.history.replaceState({}, document.title, window.location.pathname)
       return
     }
+    
+    if (success && handle) {
+      setStatus(`Connected as ${handle}`)
+      window.history.replaceState({}, document.title, window.location.pathname)
+      sessionStorage.removeItem('oauthSessionId')
+      setIsConnecting(false)
+      refresh().catch(() => {})
+    }
+    
+    // Legacy support for old callback format
+    const code = urlParams.get('code')
+    const state = urlParams.get('state')
     
     if (code && state) {
       handleOAuthCallback(code, state)
@@ -213,7 +225,7 @@ export default function App() {
       </div>
 
       <section style={{ border: '1px solid #ddd', padding: 16, borderRadius: 8, marginBottom: 16 }}>
-        <h3>1) Connect Bluesky</h3>
+        <h3>Connect Your Bluesky Account</h3>
         <div style={{ marginBottom: 16 }}>
           <button 
             onClick={onOAuthConnect} 
@@ -222,37 +234,47 @@ export default function App() {
               backgroundColor: '#0085ff', 
               color: 'white', 
               border: 'none', 
-              padding: '12px 24px', 
+              padding: '16px 32px', 
               borderRadius: 8, 
               cursor: isConnecting ? 'not-allowed' : 'pointer',
-              fontSize: 16,
-              fontWeight: 'bold'
+              fontSize: 18,
+              fontWeight: 'bold',
+              width: '100%',
+              maxWidth: '300px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px'
             }}
           >
-            {isConnecting ? 'Connecting...' : 'Connect with Bluesky'}
+            {isConnecting ? 'Connecting...' : '🔗 Connect with Bluesky'}
           </button>
+          <p style={{ marginTop: 8, fontSize: 14, color: '#666', textAlign: 'center' }}>
+            Secure OAuth login - no passwords required
+          </p>
         </div>
         
-        <div style={{ margin: '16px 0', textAlign: 'center', color: '#666' }}>
-          — or —
-        </div>
-        
-        <form onSubmit={onConnect}>
-          <input 
-            placeholder="handle (e.g. you.bsky.social)" 
-            value={handle} 
-            onChange={(e) => setHandle(e.target.value)} 
-            style={{ width: '100%', padding: 8, marginBottom: 8 }} 
-          />
-          <input 
-            type="password" 
-            placeholder="App Password" 
-            value={appPassword} 
-            onChange={(e) => setAppPassword(e.target.value)} 
-            style={{ width: '100%', padding: 8, marginBottom: 8 }} 
-          />
-          <button type="submit">Connect with App Password</button>
-        </form>
+        <details style={{ marginTop: 16 }}>
+          <summary style={{ cursor: 'pointer', color: '#666', fontSize: 14 }}>
+            Or use App Password (advanced)
+          </summary>
+          <form onSubmit={onConnect} style={{ marginTop: 12 }}>
+            <input 
+              placeholder="handle (e.g. you.bsky.social)" 
+              value={handle} 
+              onChange={(e) => setHandle(e.target.value)} 
+              style={{ width: '100%', padding: 8, marginBottom: 8 }} 
+            />
+            <input 
+              type="password" 
+              placeholder="App Password" 
+              value={appPassword} 
+              onChange={(e) => setAppPassword(e.target.value)} 
+              style={{ width: '100%', padding: 8, marginBottom: 8 }} 
+            />
+            <button type="submit">Connect with App Password</button>
+          </form>
+        </details>
       </section>
 
       <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>

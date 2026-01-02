@@ -34,7 +34,7 @@ app.get('/oauth/client-metadata.json', (req, res) => {
     application_type: 'web',
     client_name: 'Bluesky Demo App',
     client_uri: `${req.protocol}://${req.get('host')}`,
-    dpop_bound_access_tokens: true,
+    dpop_bound_access_tokens: false, // Disabled for simpler OAuth flow
     grant_types: ['authorization_code', 'refresh_token'],
     redirect_uris: [redirectUri],
     response_types: ['code'],

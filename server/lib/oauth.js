@@ -84,6 +84,15 @@ class OAuthHelper {
   }
 
   static async makePARRequest(authServer, clientId, redirectUri, codeChallenge, state, loginHint = null, dpopKeyPair) {
+    console.log('Starting PAR request:', {
+      authServer,
+      clientId,
+      redirectUri,
+      codeChallenge: codeChallenge.substring(0, 20) + '...',
+      state,
+      loginHint
+    })
+
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
@@ -98,12 +107,34 @@ class OAuthHelper {
       params.append('login_hint', loginHint)
     }
 
+    // Try direct authorization first (simpler and more reliable)
+    try {
+      console.log('Trying direct authorization (simpler approach)')
+      const authUrl = `${authServer}/oauth/authorize?` +
+        `client_id=${encodeURIComponent(clientId)}&` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+        `response_type=code&` +
+        `scope=${encodeURIComponent('atproto transition:generic')}&` +
+        `code_challenge=${encodeURIComponent(codeChallenge)}&` +
+        `code_challenge_method=S256&` +
+        `state=${state}` +
+        (loginHint ? `&login_hint=${encodeURIComponent(loginHint)}` : '')
+      
+      console.log('Direct auth URL generated successfully')
+      return { authUrl, useDirectAuth: true }
+    } catch (err) {
+      console.error('Direct auth failed:', err.message)
+    }
+
+    // Fallback to PAR with DPoP if direct fails
     let nonce = null
-    let maxRetries = 3 // Allow for nonce retry
+    let maxRetries = 3
     
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         const parUrl = `${authServer}/oauth/par`
+        console.log(`PAR attempt ${attempt + 1}/${maxRetries} to ${parUrl}`)
+        
         const { response, nonce: newNonce } = await this.makeDPoPRequest(
           parUrl,
           {
@@ -118,14 +149,18 @@ class OAuthHelper {
           nonce
         )
 
+        console.log(`PAR response status: ${response.status}`)
+        
         if (response.ok) {
           const data = await response.json()
+          console.log('PAR success:', data)
           return { requestUri: data.request_uri, nonce: newNonce || nonce }
         }
 
         // Handle DPoP nonce error
         if (response.status === 401) {
           const errorData = await response.json().catch(() => ({}))
+          console.log('PAR 401 error:', errorData)
           if (errorData.error === 'use_dpop_nonce' && newNonce) {
             nonce = newNonce
             continue // Retry with new nonce
@@ -151,8 +186,10 @@ class OAuthHelper {
 
         // For other errors, try to get error details
         const errorData = await response.json().catch(() => ({}))
-        // throw new Error(`PAR request failed: ${response.status} - ${errorData.error || errorData.error_description || 'Unknown error'}`)
+        console.error('PAR error details:', errorData)
+        throw new Error(`PAR request failed: ${response.status} - ${errorData.error || errorData.error_description || 'Unknown error'}`)
       } catch (err) {
+        console.error(`PAR attempt ${attempt + 1} failed:`, err.message)
         if (attempt === maxRetries - 1) {
           throw err
         }
@@ -173,6 +210,37 @@ class OAuthHelper {
       client_id: clientId
     })
 
+    console.log('Starting token exchange (simplified approach)')
+
+    // Try simple POST request first (without DPoP)
+    try {
+      const tokenUrl = `${authServer}/oauth/token`
+      console.log('Trying simple token exchange without DPoP')
+      
+      const response = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json'
+        },
+        body: params.toString()
+      })
+
+      console.log(`Token exchange response status: ${response.status}`)
+
+      if (response.ok) {
+        const data = await response.json()
+        console.log('Token exchange success (simple)')
+        return { tokens: data, nonce: nonce }
+      }
+
+      // If simple request fails, try with DPoP
+      console.log('Simple token exchange failed, trying with DPoP')
+    } catch (err) {
+      console.log('Simple token exchange error, trying DPoP:', err.message)
+    }
+
+    // Fallback to DPoP approach
     let currentNonce = nonce
     let maxRetries = 3
 
@@ -193,6 +261,7 @@ class OAuthHelper {
 
       if (response.ok) {
         const data = await response.json()
+        console.log('Token exchange success (DPoP)')
         return { 
           tokens: data, 
           nonce: newNonce || currentNonce 
@@ -202,6 +271,7 @@ class OAuthHelper {
       // Handle DPoP nonce error
       if (response.status === 401) {
         const errorData = await response.json().catch(() => ({}))
+        console.log('Token exchange 401 error:', errorData)
         if (errorData.error === 'use_dpop_nonce' && newNonce) {
           currentNonce = newNonce
           continue // Retry with new nonce
@@ -209,6 +279,7 @@ class OAuthHelper {
       }
 
       const errorData = await response.json().catch(() => ({}))
+      console.error('Token exchange error details:', errorData)
       throw new Error(`Token exchange failed: ${errorData.error_description || errorData.error || response.status}`)
     }
 
