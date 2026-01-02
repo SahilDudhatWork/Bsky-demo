@@ -184,6 +184,25 @@ router.post('/connect', requireAuth, async (req, res) => {
   }
 })
 
+// Check connection status
+router.get('/status', requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId)
+    const isConnected = Boolean(user?.bskyHandle || user?.bskyDid)
+    
+    return res.json({
+      connected: isConnected,
+      handle: user?.bskyHandle || null,
+      did: user?.bskyDid || null,
+      authServer: user?.bskyAuthServer || null,
+      hasAccessToken: Boolean(user?.bskyAccessTokenEnc),
+      hasAppPassword: Boolean(user?.bskyAppPasswordEnc)
+    })
+  } catch (err) {
+    return res.status(500).json({ error: err.message })
+  }
+})
+
 router.get('/feed', requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.userId)
