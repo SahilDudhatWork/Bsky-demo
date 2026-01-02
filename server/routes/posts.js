@@ -26,30 +26,16 @@ router.post('/instant', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Please connect your Bluesky account first' })
     }
 
-    const postDoc = await Post.create({ userId: req.userId, text, status: 'posting' })
+    // Post directly to Bluesky without saving to database
+    const agent = await makeAgentForUser(user)
+    const out = await agent.post({ text })
 
-    try {
-      const agent = await makeAgentForUser(user)
-      const out = await agent.post({ text })
-
-      postDoc.status = 'posted'
-      postDoc.bskyUri = out.uri
-      postDoc.bskyCid = out.cid
-      postDoc.error = undefined
-      await postDoc.save()
-
-      return res.json({ ok: true, post: postDoc })
-    } catch (bskyError) {
-      console.error('Bluesky posting error:', bskyError)
-      postDoc.status = 'failed'
-      postDoc.error = bskyError.message || 'Bluesky posting failed'
-      await postDoc.save()
-      
-      return res.status(400).json({ 
-        error: `Bluesky posting failed: ${bskyError.message}`,
-        post: postDoc 
-      })
-    }
+    return res.json({ 
+      ok: true, 
+      bskyUri: out.uri,
+      bskyCid: out.cid,
+      message: 'Posted successfully to Bluesky'
+    })
   } catch (err) {
     console.error('Post creation error:', err)
     return res.status(400).json({ error: err.message || 'Post failed' })
